@@ -1,7 +1,17 @@
-
+```python
 import os
 import sqlite3
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
+ZONA_HORARIA = ZoneInfo("America/Havana")
+
+
+def hora_cuba():
+    """Devuelve la fecha y hora actual de Cuba."""
+    return datetime.now(ZONA_HORARIA).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _db_path():
@@ -35,8 +45,8 @@ def inicializar_db():
                 victorias INTEGER NOT NULL DEFAULT 0,
                 preguntas_correctas INTEGER NOT NULL DEFAULT 0,
                 preguntas_respondidas INTEGER NOT NULL DEFAULT 0,
-                creado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                actualizado_en TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                creado_en TEXT NOT NULL,
+                actualizado_en TEXT NOT NULL
             )
         """)
 
@@ -48,18 +58,28 @@ def registrar_usuario(
 ):
     inicializar_db()
 
+    ahora = hora_cuba()
+
     with _connect() as conn:
         conn.execute("""
-            INSERT INTO perfiles (user_id, nombre, username)
-            VALUES (?, ?, ?)
+            INSERT INTO perfiles (
+                user_id,
+                nombre,
+                username,
+                creado_en,
+                actualizado_en
+            )
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 nombre = excluded.nombre,
                 username = excluded.username,
-                actualizado_en = CURRENT_TIMESTAMP
+                actualizado_en = excluded.actualizado_en
         """, (
             int(user_id),
             nombre or "Jugador",
             username,
+            ahora,
+            ahora,
         ))
 
         fila = conn.execute(
@@ -83,7 +103,7 @@ def obtener_perfil(user_id: int):
 
 
 def listar_usuarios():
-    """Devuelve usuarios ordenados del registro más antiguo al más reciente."""
+    """Devuelve usuarios ordenados por fecha de registro, del más antiguo al más reciente."""
     inicializar_db()
 
     with _connect() as conn:
@@ -104,9 +124,9 @@ def agregar_xp(user_id: int, cantidad: int):
         cursor = conn.execute("""
             UPDATE perfiles
             SET xp = xp + ?,
-                actualizado_en = CURRENT_TIMESTAMP
+                actualizado_en = ?
             WHERE user_id = ?
-        """, (cantidad, int(user_id)))
+        """, (cantidad, hora_cuba(), int(user_id)))
 
         if cursor.rowcount == 0:
             raise ValueError(
@@ -137,12 +157,13 @@ def registrar_resultado(
                 victorias = victorias + ?,
                 preguntas_correctas = preguntas_correctas + ?,
                 preguntas_respondidas = preguntas_respondidas + ?,
-                actualizado_en = CURRENT_TIMESTAMP
+                actualizado_en = ?
             WHERE user_id = ?
         """, (
             1 if victoria else 0,
             max(0, int(correctas)),
             max(0, int(respondidas)),
+            hora_cuba(),
             int(user_id),
         ))
 
@@ -162,3 +183,4 @@ def xp_para_siguiente_nivel(xp: int) -> int:
         return 0
 
     return 500 - (int(xp) % 500)
+```
