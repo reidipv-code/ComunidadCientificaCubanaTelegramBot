@@ -1,6 +1,5 @@
 # comandos/constructor.py
 
-import re
 import unicodedata
 
 from telegram import Update
@@ -12,9 +11,13 @@ from core.constructor_db import (
     usuario_descubrio_nombre,
 )
 from juegos.sustancias import SUSTANCIAS
+from juegos.desafio_sustancias import comenzar_desafio
 
 
-SUBINDICES = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
+SUBINDICES = str.maketrans(
+    "₀₁₂₃₄₅₆₇₈₉",
+    "0123456789",
+)
 
 
 def _formula_normalizada(texto: str) -> str:
@@ -27,7 +30,6 @@ def _nombre_normalizado(texto: str) -> str:
 
 
 def _buscar_por_formula(formula: str):
-    # Las fórmulas distinguen mayúsculas y minúsculas.
     formula = _formula_normalizada(formula)
 
     return [
@@ -50,7 +52,7 @@ def _buscar_por_nombre(nombre: str):
 def _texto_sustancia(sustancia: dict) -> str:
     return (
         f"🧪 {sustancia['nombre']}\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━\n"
         f"🛠️ {sustancia['descripcion1']}\n\n"
         f"💡 {sustancia['descripcion2']}\n\n"
         f"⚗️ Fórmula: {sustancia['formula']}"
@@ -70,18 +72,32 @@ async def constructor(
     if not context.args:
         await mensaje.reply_text(
             "🧪 CONSTRUCTOR DE SUSTANCIAS\n\n"
-            "Usa una fórmula para descubrir una sustancia:\n"
+            "🔬 Descubre sustancias con su fórmula:\n"
             "/constructor H2O\n\n"
-            "Después de descubrirla, puedes buscarla por su nombre:\n"
+            "📖 Consulta una sustancia descubierta:\n"
             "/constructor agua\n\n"
-            "Para consultar tus descubrimientos:\n"
-            "/constructor lista de sustancias"
+            "📚 Consulta tus descubrimientos:\n"
+            "/constructor lista de sustancias\n\n"
+            "🎮 Desafío de química:\n"
+            "/constructor desafio\n\n"
+            "En el desafío debes responder dentro del tiempo "
+            "para ganar 100 EXP."
         )
         return
 
     argumento = " ".join(context.args).strip()
+    argumento_normalizado = _nombre_normalizado(argumento)
 
-    if _nombre_normalizado(argumento) in {
+    if argumento_normalizado in {
+        "desafio",
+        "desafío",
+        "reto",
+        "challenge",
+    }:
+        await comenzar_desafio(update, context)
+        return
+
+    if argumento_normalizado in {
         "lista de sustancias",
         "lista sustancias",
         "mis sustancias",
@@ -109,12 +125,11 @@ async def constructor(
 
         texto = "\n".join(lineas)
 
-        # Evita superar el límite de longitud de Telegram.
         for inicio in range(0, len(texto), 3800):
             await mensaje.reply_text(texto[inicio:inicio + 3800])
+
         return
 
-    # Primero se comprueba si el argumento es una fórmula exacta.
     coincidencias = _buscar_por_formula(argumento)
 
     if coincidencias:
@@ -122,6 +137,7 @@ async def constructor(
 
         for sustancia in coincidencias:
             formula = _formula_normalizada(sustancia["formula"])
+
             if registrar_descubrimiento(
                 usuario.id,
                 formula,
@@ -131,19 +147,19 @@ async def constructor(
 
         if nuevos:
             nombres = "\n".join(
-                f"• {s['formula']} — {s['nombre']}"
-                for s in nuevos
+                f"• {sustancia['formula']} — {sustancia['nombre']}"
+                for sustancia in nuevos
             )
+
             await mensaje.reply_text(
                 "🎉 ¡Felicidades! Has descubierto:\n\n" + nombres
             )
 
         for sustancia in coincidencias:
             await mensaje.reply_text(_texto_sustancia(sustancia))
+
         return
 
-    # Buscar por nombre solo funciona si ya se descubrió primero
-    # mediante la fórmula.
     por_nombre = _buscar_por_nombre(argumento)
 
     if por_nombre:
@@ -165,13 +181,13 @@ async def constructor(
 
         for sustancia in descubiertas:
             await mensaje.reply_text(_texto_sustancia(sustancia))
+
         return
 
     await mensaje.reply_text(
         "❌ No encontré esa fórmula o sustancia.\n\n"
         "Las fórmulas distinguen mayúsculas y minúsculas: "
-        "`H2O` es válida, pero `h2o` no.\n"
+        "H2O es válida, pero h2o no.\n"
         "Los nombres no distinguen mayúsculas y minúsculas.\n\n"
-        "Usa /constructor para ver las instrucciones.",
-        parse_mode="Markdown",
+        "Usa /constructor para ver las instrucciones."
     )
