@@ -11,7 +11,9 @@ from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
+    MessageHandler,
     ContextTypes,
+    filters,
 )
 
 from comandos.ayuda import ayuda
@@ -19,9 +21,13 @@ from comandos.constructor import constructor
 from comandos.perfil import perfil
 from comandos.trivia import trivia
 from comandos.usuarios import users
+
 from core.constructor_db import inicializar_constructor_db
 from core.profile_db import inicializar_db, registrar_usuario
+
 from juegos.trivia import responder_boton
+from juegos.desafio_sustancias import responder_desafio
+
 
 load_dotenv()
 
@@ -33,6 +39,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 
@@ -62,10 +69,12 @@ async def start(
         "📌 COMANDOS\n"
         "• /trivia 9 — Jugar con preguntas de 9.º grado.\n"
         "• /perfil — Consultar tu EXP y estadísticas.\n"
-        "• /constructor H2O — Descubrir una sustancia por su fórmula.\n"
-        "• /constructor agua — Consultar una sustancia ya descubierta.\n"
+        "• /constructor H2O — Descubrir una sustancia.\n"
+        "• /constructor agua — Consultar una sustancia descubierta.\n"
         "• /constructor lista de sustancias — Ver tus descubrimientos.\n"
-        "• /help — Ver todos los comandos y reglas.\n\n"
+        "• /constructor desafio — Jugar un desafío de química.\n"
+        "• /help — Ver todos los comandos y las reglas.\n\n"
+        "🏆 En el desafío puedes ganar 100 EXP por respuesta correcta.\n"
         "Tus descubrimientos se guardan por usuario."
     )
 
@@ -108,13 +117,26 @@ def main():
         )
 
     application.add_handler(CommandHandler("start", start))
+
     application.add_handler(
         CommandHandler(["help", "ayuda"], ayuda)
     )
-    application.add_handler(CommandHandler("trivia", trivia))
-    application.add_handler(CommandHandler("perfil", perfil))
-    application.add_handler(CommandHandler("users", users))
-    application.add_handler(CommandHandler("constructor", constructor))
+
+    application.add_handler(
+        CommandHandler("trivia", trivia)
+    )
+
+    application.add_handler(
+        CommandHandler("perfil", perfil)
+    )
+
+    application.add_handler(
+        CommandHandler("users", users)
+    )
+
+    application.add_handler(
+        CommandHandler("constructor", constructor)
+    )
 
     application.add_handler(
         CallbackQueryHandler(
@@ -123,10 +145,24 @@ def main():
         )
     )
 
+    # Procesa los mensajes de texto que sean respuestas al desafío.
+    # Se registra en el grupo 1 para que no interfiera con los
+    # comandos ni con los botones de la trivia.
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            responder_desafio,
+        ),
+        group=1,
+    )
+
     application.add_error_handler(error_handler)
 
     logger.info("Trivia de Química iniciando...")
-    application.run_polling(drop_pending_updates=False)
+
+    application.run_polling(
+        drop_pending_updates=False,
+    )
 
 
 if __name__ == "__main__":
