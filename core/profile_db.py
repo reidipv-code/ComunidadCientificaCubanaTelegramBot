@@ -1,4 +1,3 @@
-```python
 import os
 import sqlite3
 from pathlib import Path
@@ -183,4 +182,3 @@ def xp_para_siguiente_nivel(xp: int) -> int:
         return 0
 
     return 500 - (int(xp) % 500)
-```
