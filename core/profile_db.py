@@ -1,36 +1,31 @@
+
 import os
 import sqlite3
 from pathlib import Path
 
 
 def _db_path():
-    configurada = os.getenv("DATABASE_PATH", "").strip()
+    configured = os.getenv("DATABASE_PATH", "").strip()
 
-    if configurada:
-        ruta = Path(configurada)
+    if configured:
+        path = Path(configured)
     else:
-        ruta = (
-            Path(__file__).resolve().parent.parent
-            / "quimica.sqlite3"
-        )
+        path = Path(__file__).resolve().parent.parent / "quimica.sqlite3"
 
-    ruta.parent.mkdir(parents=True, exist_ok=True)
-    return ruta
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _connect():
-    conexion = sqlite3.connect(
-        _db_path(),
-        timeout=15,
-    )
-    conexion.row_factory = sqlite3.Row
-    conexion.execute("PRAGMA busy_timeout=15000")
-    return conexion
+    conn = sqlite3.connect(_db_path(), timeout=15)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=15000")
+    return conn
 
 
 def inicializar_db():
-    with _connect() as conexion:
-        conexion.execute("""
+    with _connect() as conn:
+        conn.execute("""
             CREATE TABLE IF NOT EXISTS perfiles (
                 user_id INTEGER PRIMARY KEY,
                 nombre TEXT NOT NULL,
@@ -53,24 +48,21 @@ def registrar_usuario(
 ):
     inicializar_db()
 
-    with _connect() as conexion:
-        conexion.execute(
-            """
+    with _connect() as conn:
+        conn.execute("""
             INSERT INTO perfiles (user_id, nombre, username)
             VALUES (?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 nombre = excluded.nombre,
                 username = excluded.username,
                 actualizado_en = CURRENT_TIMESTAMP
-            """,
-            (
-                int(user_id),
-                nombre or f"Jugador {user_id}",
-                username,
-            ),
-        )
+        """, (
+            int(user_id),
+            nombre or "Jugador",
+            username,
+        ))
 
-        fila = conexion.execute(
+        fila = conn.execute(
             "SELECT * FROM perfiles WHERE user_id = ?",
             (int(user_id),),
         ).fetchone()
@@ -81,8 +73,8 @@ def registrar_usuario(
 def obtener_perfil(user_id: int):
     inicializar_db()
 
-    with _connect() as conexion:
-        fila = conexion.execute(
+    with _connect() as conn:
+        fila = conn.execute(
             "SELECT * FROM perfiles WHERE user_id = ?",
             (int(user_id),),
         ).fetchone()
@@ -90,27 +82,38 @@ def obtener_perfil(user_id: int):
         return dict(fila) if fila else None
 
 
-def agregar_xp(user_id: int, cantidad: int):
-    cantidad = max(0, int(cantidad))
+def listar_usuarios():
+    """Devuelve usuarios ordenados del registro más antiguo al más reciente."""
     inicializar_db()
 
-    with _connect() as conexion:
-        cursor = conexion.execute(
-            """
+    with _connect() as conn:
+        filas = conn.execute("""
+            SELECT user_id, nombre, username, creado_en, xp
+            FROM perfiles
+            ORDER BY datetime(creado_en) ASC, user_id ASC
+        """).fetchall()
+
+        return [dict(fila) for fila in filas]
+
+
+def agregar_xp(user_id: int, cantidad: int):
+    inicializar_db()
+    cantidad = max(0, int(cantidad))
+
+    with _connect() as conn:
+        cursor = conn.execute("""
             UPDATE perfiles
-            SET xp = MIN(xp + ?, 249500),
+            SET xp = xp + ?,
                 actualizado_en = CURRENT_TIMESTAMP
             WHERE user_id = ?
-            """,
-            (cantidad, int(user_id)),
-        )
+        """, (cantidad, int(user_id)))
 
         if cursor.rowcount == 0:
             raise ValueError(
                 f"No existe el perfil del usuario {user_id}."
             )
 
-        fila = conexion.execute(
+        fila = conn.execute(
             "SELECT * FROM perfiles WHERE user_id = ?",
             (int(user_id),),
         ).fetchone()
@@ -127,9 +130,8 @@ def registrar_resultado(
 ):
     inicializar_db()
 
-    with _connect() as conexion:
-        cursor = conexion.execute(
-            """
+    with _connect() as conn:
+        cursor = conn.execute("""
             UPDATE perfiles SET
                 partidas = partidas + 1,
                 victorias = victorias + ?,
@@ -137,14 +139,12 @@ def registrar_resultado(
                 preguntas_respondidas = preguntas_respondidas + ?,
                 actualizado_en = CURRENT_TIMESTAMP
             WHERE user_id = ?
-            """,
-            (
-                1 if victoria else 0,
-                max(0, int(correctas)),
-                max(0, int(respondidas)),
-                int(user_id),
-            ),
-        )
+        """, (
+            1 if victoria else 0,
+            max(0, int(correctas)),
+            max(0, int(respondidas)),
+            int(user_id),
+        ))
 
         if cursor.rowcount == 0:
             raise ValueError(
@@ -153,8 +153,7 @@ def registrar_resultado(
 
 
 def nivel_desde_xp(xp: int) -> int:
-    # Cada nivel requiere 500 EXP.
-    # Nivel máximo: 500.
+    # Cada nivel requiere 500 EXP; el máximo es el nivel 500.
     return min(500, max(1, int(xp) // 500 + 1))
 
 
