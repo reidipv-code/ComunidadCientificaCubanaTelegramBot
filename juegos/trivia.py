@@ -1,4 +1,3 @@
-# juegos/trivia.py
 
 import logging
 import random
@@ -19,7 +18,7 @@ from juegos.preguntas import obtener_preguntas
 
 TOTAL_PREGUNTAS = 10
 VIDAS_INICIALES = 3
-TIEMPO_PREGUNTA = 10
+TIEMPO_PREGUNTA = 25
 COOLDOWN_PERDIDA = 90
 RETRASO_SIGUIENTE = 1.25
 
@@ -59,7 +58,7 @@ def _texto_pregunta(partida):
         f"🎓 Grado(s): {grados}\n"
         f"❓ Pregunta {partida['indice'] + 1}/{TOTAL_PREGUNTAS}\n"
         f"💗 Vidas: {_corazones(partida['vidas'])}\n"
-        f"⏱️ Tienes {TIEMPO_PREGUNTA} segundos\n\n"
+        f"⏱️ Tienes {TIEMPO_PREGUNTA} segundos para responder.\n\n"
         f"{pregunta['prompt']}"
     )
 
@@ -166,13 +165,13 @@ async def _timeout_pregunta(context):
     partida["respondida"] = True
     partida["timeout_job"] = None
     partida["vidas"] -= 1
-    partida["respondidas_total"] += 1
+    partida["respondidas_total"] = (
+        partida.get("respondidas_total", 0) + 1
+    )
 
     pregunta = partida["preguntas"][partida["indice"]]
     correcta = next(
-        opcion["text"]
-        for opcion in pregunta["options"]
-        if opcion["correct"]
+        op["text"] for op in pregunta["options"] if op["correct"]
     )
 
     texto = (
@@ -186,26 +185,18 @@ async def _timeout_pregunta(context):
         await _finalizar_perdida(context, partida, texto)
         return
 
-    try:
-        await context.bot.edit_message_text(
-            chat_id=partida["chat_id"],
-            message_id=partida["message_id"],
-            text=texto,
-        )
-    except TelegramError:
-        logger.exception("No se pudo actualizar el mensaje del tiempo agotado")
-        return
+    await context.bot.edit_message_text(
+        chat_id=partida["chat_id"],
+        message_id=partida["message_id"],
+        text=texto,
+    )
 
     await _programar_siguiente(context, partida)
 
 
 async def responder_boton(update, context):
     query = update.callback_query
-
-    try:
-        await query.answer()
-    except TelegramError:
-        pass
+    await query.answer()
 
     try:
         prefijo, sid, indice_txt = query.data.split("|", 2)
@@ -220,23 +211,17 @@ async def responder_boton(update, context):
     partida = _partidas(context.application).get(user_id)
 
     if not partida or partida["sid"] != sid:
-        try:
-            await query.answer(
-                "Esta partida ya terminó.",
-                show_alert=True,
-            )
-        except TelegramError:
-            pass
+        await query.answer(
+            "Esta partida ya terminó.",
+            show_alert=True,
+        )
         return
 
-    if not query.message or query.message.chat_id != partida["chat_id"]:
-        try:
-            await query.answer(
-                "Este botón pertenece a otra partida.",
-                show_alert=True,
-            )
-        except TelegramError:
-            pass
+    if query.message.chat_id != partida["chat_id"]:
+        await query.answer(
+            "Este botón pertenece a otra partida.",
+            show_alert=True,
+        )
         return
 
     if partida["respondida"]:
@@ -246,7 +231,10 @@ async def responder_boton(update, context):
         return
 
     partida["respondida"] = True
-    partida["respondidas_total"] += 1
+    partida["respondidas_total"] = (
+        partida.get("respondidas_total", 0) + 1
+    )
+
     _cancelar_timeout(partida)
 
     opcion_elegida = partida["opciones_actuales"][indice_opcion]
@@ -264,9 +252,9 @@ async def responder_boton(update, context):
         partida["vidas"] -= 1
 
         correcta = next(
-            opcion["text"]
-            for opcion in pregunta["options"]
-            if opcion["correct"]
+            op["text"]
+            for op in pregunta["options"]
+            if op["correct"]
         )
 
         texto = (
@@ -281,12 +269,7 @@ async def responder_boton(update, context):
         await _finalizar_perdida(context, partida, texto)
         return
 
-    try:
-        await query.edit_message_text(text=texto)
-    except TelegramError:
-        logger.exception("No se pudo actualizar la respuesta")
-        return
-
+    await query.edit_message_text(text=texto)
     await _programar_siguiente(context, partida)
 
 
@@ -304,7 +287,7 @@ async def _finalizar_perdida(context, partida, mensaje_previo=None):
             partida["user_id"],
             victoria=False,
             correctas=partida["aciertos"],
-            respondidas=partida["respondidas_total"],
+            respondidas=partida.get("respondidas_total", 0),
         )
     except Exception:
         logger.exception(
@@ -328,7 +311,7 @@ async def _finalizar_perdida(context, partida, mensaje_previo=None):
             text=texto,
         )
     except TelegramError:
-        logger.exception("No se pudo mostrar el final de la partida perdida")
+        pass
 
 
 async def _finalizar_ganada(context, partida):
@@ -354,7 +337,10 @@ async def _finalizar_ganada(context, partida):
             user_id,
             victoria=True,
             correctas=partida["aciertos"],
-            respondidas=partida["respondidas_total"],
+            respondidas=partida.get(
+                "respondidas_total",
+                partida["indice"] + 1,
+            ),
         )
 
         perfil_despues = obtener_perfil(user_id)
@@ -369,7 +355,7 @@ async def _finalizar_ganada(context, partida):
 
     except Exception:
         logger.exception(
-            "No se pudo guardar la recompensa del usuario %s",
+            "No se pudo guardar la recompensa o estadísticas del usuario %s",
             user_id,
         )
 
@@ -380,12 +366,13 @@ async def _finalizar_ganada(context, partida):
                 text=(
                     "🏁 ¡Terminaste las 10 preguntas!\n"
                     f"🎯 Aciertos: {partida['aciertos']}/10\n"
-                    "⚠️ No pude guardar la EXP. "
+                    "⚠️ No pude guardar la EXP en la base de datos. "
                     "Revisa los logs de Railway."
                 ),
             )
         except TelegramError:
-            logger.exception("No se pudo mostrar el resultado final")
+            pass
+
         return
 
     texto = (
@@ -408,21 +395,20 @@ async def _finalizar_ganada(context, partida):
             text=texto,
         )
     except TelegramError:
-        logger.exception("No se pudo mostrar el resultado de la victoria")
+        pass
 
 
 async def iniciar_partida(update, context, grados):
     user = update.effective_user
     chat = update.effective_chat
-    mensaje_original = update.effective_message
 
-    if not user or not chat or not mensaje_original:
+    if not user or not chat or not update.effective_message:
         return
 
     partidas = _partidas(context.application)
 
     if user.id in partidas:
-        await mensaje_original.reply_text(
+        await update.effective_message.reply_text(
             "⚠️ Ya tienes una partida de Química en curso. "
             "Termínala primero."
         )
@@ -434,12 +420,11 @@ async def iniciar_partida(update, context, grados):
     if ahora < fin_cooldown:
         restante = int(fin_cooldown - ahora + 0.999)
 
-        await mensaje_original.reply_text(
+        await update.effective_message.reply_text(
             f"⏳ Espera {restante} segundos antes de iniciar otra partida."
         )
         return
 
-    # Crear el perfil automáticamente; no existe /reg.
     registrar_usuario(
         user.id,
         user.full_name or user.username or f"Jugador {user.id}",
@@ -449,7 +434,7 @@ async def iniciar_partida(update, context, grados):
     banco = obtener_preguntas(grados)
 
     if len(banco) < TOTAL_PREGUNTAS:
-        await mensaje_original.reply_text(
+        await update.effective_message.reply_text(
             "❌ No hay suficientes preguntas para los grados "
             f"{', '.join(map(str, grados))}."
         )
@@ -474,7 +459,7 @@ async def iniciar_partida(update, context, grados):
         "timeout_job": None,
     }
 
-    mensaje = await mensaje_original.reply_text(
+    mensaje = await update.effective_message.reply_text(
         "🧪 Preparando tu partida..."
     )
 
@@ -485,5 +470,4 @@ async def iniciar_partida(update, context, grados):
         await _mostrar_pregunta(context, partida)
     except TelegramError:
         partidas.pop(user.id, None)
-        logger.exception("No se pudo iniciar la partida")
         raise
