@@ -1,3 +1,5 @@
+# bot_railway.py
+
 import logging
 import os
 from datetime import datetime
@@ -13,22 +15,17 @@ from telegram.ext import (
 )
 
 from comandos.ayuda import ayuda
+from comandos.constructor import constructor
 from comandos.perfil import perfil
 from comandos.trivia import trivia
 from comandos.usuarios import users
+from core.constructor_db import inicializar_constructor_db
 from core.profile_db import inicializar_db, registrar_usuario
 from juegos.trivia import responder_boton
 
 load_dotenv()
 
-# Zona horaria exclusiva de Cuba.
 ZONA_HORARIA = ZoneInfo("America/Havana")
-
-
-def hora_cuba() -> datetime:
-    """Devuelve la fecha y hora actual de Cuba."""
-    return datetime.now(ZONA_HORARIA)
-
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -39,30 +36,38 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 
+def hora_cuba() -> datetime:
+    return datetime.now(ZONA_HORARIA)
+
+
 async def start(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    user = update.effective_user
+    usuario = update.effective_user
     mensaje = update.effective_message
 
-    if user and mensaje:
-        registrar_usuario(
-            user.id,
-            user.full_name or user.username or f"Jugador {user.id}",
-            user.username,
-        )
+    if not usuario or not mensaje:
+        return
 
-        await mensaje.reply_text(
-            "🧪 ¡Bienvenido a la Trivia de Química!\n\n"
-            "Responde 10 preguntas, con 3 vidas y 25 segundos por pregunta.\n\n"
-            "📌 COMANDOS\n"
-            "• /trivia 9 — Jugar con preguntas de 9.º grado.\n"
-            "• /trivia 8 y 9 — Combinar grados.\n"
-            "• /perfil — Consultar tu EXP y estadísticas.\n"
-            "• /help — Ver todos los comandos y reglas.\n\n"
-            "Tu perfil y tu EXP son exclusivos de este bot."
-        )
+    registrar_usuario(
+        usuario.id,
+        usuario.full_name or usuario.username or f"Jugador {usuario.id}",
+        usuario.username,
+    )
+
+    await mensaje.reply_text(
+        "🧪 ¡Bienvenido a la Trivia de Química!\n\n"
+        "Responde preguntas de química, gana EXP y descubre sustancias.\n\n"
+        "📌 COMANDOS\n"
+        "• /trivia 9 — Jugar con preguntas de 9.º grado.\n"
+        "• /perfil — Consultar tu EXP y estadísticas.\n"
+        "• /constructor H2O — Descubrir una sustancia por su fórmula.\n"
+        "• /constructor agua — Consultar una sustancia ya descubierta.\n"
+        "• /constructor lista de sustancias — Ver tus descubrimientos.\n"
+        "• /help — Ver todos los comandos y reglas.\n\n"
+        "Tus descubrimientos se guardan por usuario."
+    )
 
 
 async def error_handler(
@@ -92,6 +97,7 @@ def main():
     )
 
     inicializar_db()
+    inicializar_constructor_db()
 
     application = Application.builder().token(TOKEN).build()
 
@@ -108,6 +114,7 @@ def main():
     application.add_handler(CommandHandler("trivia", trivia))
     application.add_handler(CommandHandler("perfil", perfil))
     application.add_handler(CommandHandler("users", users))
+    application.add_handler(CommandHandler("constructor", constructor))
 
     application.add_handler(
         CallbackQueryHandler(
