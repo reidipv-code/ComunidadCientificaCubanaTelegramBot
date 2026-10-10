@@ -1,6 +1,8 @@
-
+```python
 import logging
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 from telegram import Update
@@ -20,6 +22,15 @@ from juegos.trivia import responder_boton
 
 load_dotenv()
 
+# Zona horaria exclusiva de Cuba.
+ZONA_HORARIA = ZoneInfo("America/Havana")
+
+
+def hora_cuba() -> datetime:
+    """Devuelve la fecha y hora actual de Cuba."""
+    return datetime.now(ZONA_HORARIA)
+
+
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=os.getenv("LOG_LEVEL", "INFO").upper(),
@@ -29,7 +40,10 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
     user = update.effective_user
     mensaje = update.effective_message
 
@@ -56,14 +70,15 @@ async def error_handler(
     update: object,
     context: ContextTypes.DEFAULT_TYPE,
 ):
-    logger.error(
-        "Error procesando update",
-        exc_info=(
-            type(context.error),
-            context.error,
-            context.error.__traceback__,
-        ) if context.error else None,
-    )
+    if context.error:
+        logger.error(
+            "Error procesando update",
+            exc_info=(
+                type(context.error),
+                context.error,
+                context.error.__traceback__,
+            ),
+        )
 
 
 def main():
@@ -71,6 +86,11 @@ def main():
         raise RuntimeError(
             "Falta BOT_TOKEN en las variables de entorno."
         )
+
+    logger.info(
+        "Hora de Cuba al iniciar: %s",
+        hora_cuba().strftime("%Y-%m-%d %H:%M:%S %Z"),
+    )
 
     inicializar_db()
 
@@ -105,3 +125,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
