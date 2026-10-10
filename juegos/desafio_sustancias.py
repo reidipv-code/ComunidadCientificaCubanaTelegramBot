@@ -9,7 +9,7 @@ from core.profile_db import agregar_xp, registrar_usuario
 from juegos.sustancias import SUSTANCIAS
 
 
-XP_POR_ACIERTO = 100
+XP_POR_ACIERTO = 5
 COOLDOWN_SEGUNDOS = 60
 
 DESAFIOS_ACTIVOS = {}
@@ -19,8 +19,9 @@ COOLDOWNS = {}
 def normalizar_nombre(texto: str) -> str:
     texto = unicodedata.normalize("NFD", texto.strip().casefold())
     texto = "".join(
-        c for c in texto
-        if unicodedata.category(c) != "Mn"
+        caracter
+        for caracter in texto
+        if unicodedata.category(caracter) != "Mn"
     )
     return " ".join(texto.split())
 
@@ -38,8 +39,10 @@ def obtener_tiempo_limite(formula: str) -> int:
 
     if longitud <= 4:
         return 10
+
     if longitud <= 8:
         return 20
+
     return 30
 
 
@@ -103,10 +106,10 @@ async def terminar_desafio(
 
     if motivo == "tiempo":
         texto = (
-            "⏰ ¡Se acabó el tiempo!\n\n"
+            "⏰ ¡SE ACABÓ EL TIEMPO!\n\n"
             f"🧪 Sustancia: {nombre}\n"
-            f"⚗️ Fórmula: {formula}\n"
-            "❌ Desafío perdido. No ganas XP."
+            f"⚗️ Fórmula: {formula}\n\n"
+            "❌ Has perdido la partida."
         )
     else:
         correcta = (
@@ -116,17 +119,18 @@ async def terminar_desafio(
         )
 
         texto = (
-            "❌ ¡Respuesta incorrecta!\n\n"
-            f"Tu respuesta: {respuesta_usuario}\n"
-            f"Respuesta correcta: {correcta}\n\n"
+            "❌ ¡RESPUESTA INCORRECTA!\n\n"
+            f"✍️ Tu respuesta: {respuesta_usuario}\n"
+            f"✅ Respuesta correcta: {correcta}\n\n"
             f"🧪 Sustancia: {nombre}\n"
-            f"⚗️ Fórmula: {formula}\n"
-            "🏁 Desafío terminado. No ganas XP."
+            f"⚗️ Fórmula: {formula}\n\n"
+            "🏁 ¡La partida ha terminado!"
         )
 
     texto += (
-        "\n\n⏳ Podrás jugar otra vez "
-        "dentro de 60 segundos."
+        f"\n\n🏆 EXP obtenida durante la partida: "
+        f"{desafio['xp_ganada']}\n"
+        "⏳ Podrás jugar otra vez dentro de 60 segundos."
     )
 
     await context.bot.send_message(
@@ -135,17 +139,116 @@ async def terminar_desafio(
     )
 
 
-async def temporizador_desafio(context: ContextTypes.DEFAULT_TYPE):
+async def temporizador_desafio(
+    context: ContextTypes.DEFAULT_TYPE,
+):
     job = context.job
 
     if not job or not job.data:
         return
 
+    user_id = job.data["user_id"]
+    desafio = DESAFIOS_ACTIVOS.get(user_id)
+
+    # Ignorar temporizadores de preguntas anteriores.
+    if not desafio:
+        return
+
+    if desafio["pregunta_id"] != job.data["pregunta_id"]:
+        return
+
     await terminar_desafio(
         context,
-        job.data["user_id"],
+        user_id,
         motivo="tiempo",
     )
+
+
+async def enviar_pregunta(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_id: int,
+    sustancia_anterior=None,
+):
+    desafio = DESAFIOS_ACTIVOS.get(user_id)
+
+    if not desafio:
+        return
+
+    catalogo = desafio["catalogo"]
+
+    if not catalogo:
+        DESAFIOS_ACTIVOS.pop(user_id, None)
+
+        await update.effective_message.reply_text(
+            "❌ No hay sustancias disponibles para jugar."
+        )
+        return
+
+    # Evitar repetir inmediatamente la misma sustancia
+    # cuando existen otras opciones en el catálogo.
+    opciones = [
+        item for item in catalogo
+        if item["formula"] != sustancia_anterior
+    ]
+
+    if not opciones:
+        opciones = catalogo
+
+    sustancia = random.choice(opciones)
+
+    formula = sustancia["formula"]
+    nombre = sustancia["nombre"]
+
+    limite = obtener_tiempo_limite(formula)
+    tipo = random.choice(("formula", "nombre"))
+
+    desafio["sustancia"] = sustancia
+    desafio["tipo"] = tipo
+    desafio["pregunta_id"] += 1
+
+    pregunta_id = desafio["pregunta_id"]
+
+    if tipo == "formula":
+        pregunta = (
+            "🧪 DESAFÍO INFINITO DE QUÍMICA\n\n"
+            f"¿Cuál es la fórmula química de {nombre}?\n\n"
+            f"⏱️ Tiempo para responder: {limite} segundos\n"
+            f"⭐ Recompensa por acertar: +{XP_POR_ACIERTO} EXP\n"
+            f"🏆 EXP acumulada en esta partida: "
+            f"{desafio['xp_ganada']}\n\n"
+            "✍️ Escribe solamente la fórmula.\n"
+            "♾️ ¡Cada acierto te dará otra pregunta!"
+        )
+    else:
+        pregunta = (
+            "🧪 DESAFÍO INFINITO DE QUÍMICA\n\n"
+            f"¿Qué sustancia corresponde a {formula}?\n\n"
+            f"⏱️ Tiempo para responder: {limite} segundos\n"
+            f"⭐ Recompensa por acertar: +{XP_POR_ACIERTO} EXP\n"
+            f"🏆 EXP acumulada en esta partida: "
+            f"{desafio['xp_ganada']}\n\n"
+            "✍️ Escribe solamente el nombre.\n"
+            "♾️ ¡Cada acierto te dará otra pregunta!"
+        )
+
+    try:
+        context.job_queue.run_once(
+            temporizador_desafio,
+            when=limite,
+            data={
+                "user_id": user_id,
+                "pregunta_id": pregunta_id,
+            },
+            name=f"desafio_sustancias_{user_id}",
+        )
+    except Exception:
+        await update.effective_message.reply_text(
+            "❌ No se pudo iniciar el temporizador."
+        )
+        raise
+
+    await update.effective_message.reply_text(pregunta)
 
 
 async def comenzar_desafio(
@@ -166,19 +269,20 @@ async def comenzar_desafio(
         )
         return
 
+    # No permitir comenzar otra partida si ya existe una activa.
+    if user.id in DESAFIOS_ACTIVOS:
+        await message.reply_text(
+            "🧪 Ya tienes una partida activa.\n"
+            "♾️ ¡Sigue respondiendo para ganar EXP!"
+        )
+        return
+
     restante = tiempo_restante(user.id)
 
     if restante > 0:
         await message.reply_text(
             f"⏳ Espera {restante} segundos "
-            "antes de jugar otra vez."
-        )
-        return
-
-    if user.id in DESAFIOS_ACTIVOS:
-        await message.reply_text(
-            "🧪 Ya tienes un desafío activo. "
-            "Responde antes de que termine el tiempo."
+            "antes de comenzar otra partida."
         )
         return
 
@@ -191,51 +295,20 @@ async def comenzar_desafio(
         )
         return
 
-    sustancia = random.choice(catalogo)
-    formula = sustancia["formula"]
-    nombre = sustancia["nombre"]
-
-    limite = obtener_tiempo_limite(formula)
-    tipo = random.choice(("formula", "nombre"))
-
-    if tipo == "formula":
-        pregunta = (
-            "🧪 DESAFÍO DE QUÍMICA\n\n"
-            f"¿Cuál es la fórmula química de {nombre}?\n\n"
-            f"⏱️ Tienes {limite} segundos.\n"
-            f"🏆 Ganas {XP_POR_ACIERTO} XP si aciertas.\n"
-            "✍️ Escribe solamente la fórmula."
-        )
-    else:
-        pregunta = (
-            "🧪 DESAFÍO DE QUÍMICA\n\n"
-            f"¿Qué sustancia corresponde a {formula}?\n\n"
-            f"⏱️ Tienes {limite} segundos.\n"
-            f"🏆 Ganas {XP_POR_ACIERTO} XP si aciertas.\n"
-            "✍️ Escribe solamente el nombre."
-        )
-
     DESAFIOS_ACTIVOS[user.id] = {
-        "sustancia": sustancia,
-        "tipo": tipo,
         "chat_id": chat.id,
+        "catalogo": catalogo,
+        "sustancia": None,
+        "tipo": None,
+        "pregunta_id": 0,
+        "xp_ganada": 0,
     }
 
-    try:
-        context.job_queue.run_once(
-            temporizador_desafio,
-            when=limite,
-            data={"user_id": user.id},
-            name=f"desafio_sustancias_{user.id}",
-        )
-    except Exception:
-        DESAFIOS_ACTIVOS.pop(user.id, None)
-        await message.reply_text(
-            "❌ No pude iniciar el temporizador."
-        )
-        raise
-
-    await message.reply_text(pregunta)
+    await enviar_pregunta(
+        update,
+        context,
+        user.id,
+    )
 
 
 async def responder_desafio(
@@ -260,6 +333,10 @@ async def responder_desafio(
         return
 
     sustancia = desafio["sustancia"]
+
+    if not sustancia:
+        return
+
     formula_correcta = sustancia["formula"]
     nombre_correcto = sustancia["nombre"]
 
@@ -274,6 +351,7 @@ async def responder_desafio(
             == normalizar_nombre(nombre_correcto)
         )
 
+    # Si falla, la partida termina.
     if not correcto:
         await terminar_desafio(
             context,
@@ -283,11 +361,13 @@ async def responder_desafio(
         )
         return
 
-    # Eliminar primero el desafío evita entregar XP dos veces.
-    DESAFIOS_ACTIVOS.pop(user.id, None)
-    cancelar_temporizador(context, user.id)
-    activar_cooldown(user.id)
+    # Guardar la sustancia anterior antes de generar otra pregunta.
+    sustancia_anterior = formula_correcta
 
+    # Cancelar el temporizador de la pregunta respondida.
+    cancelar_temporizador(context, user.id)
+
+    # Sumar exactamente 5 EXP por este acierto.
     try:
         registrar_usuario(
             user.id,
@@ -298,19 +378,36 @@ async def responder_desafio(
         agregar_xp(user.id, XP_POR_ACIERTO)
 
     except Exception:
+        await terminar_desafio(
+            context,
+            user.id,
+            motivo="error",
+            respuesta_usuario=message.text,
+        )
+
         await message.reply_text(
-            "✅ ¡Respuesta correcta!\n"
-            f"🧪 {nombre_correcto} — {formula_correcta}\n"
-            "⚠️ No se pudo guardar la XP. "
+            "⚠️ Ocurrió un error al guardar la EXP. "
             "Revisa los logs del bot."
         )
         return
 
+    # La partida continúa: no hay límite de preguntas
+    # y no se activa ningún cooldown por acertar.
+    desafio["xp_ganada"] += XP_POR_ACIERTO
+
     await message.reply_text(
-        "✅ ¡Correcto!\n\n"
+        "✅ ¡RESPUESTA CORRECTA!\n\n"
         f"🧪 {nombre_correcto}\n"
         f"⚗️ Fórmula: {formula_correcta}\n"
-        f"🏆 +{XP_POR_ACIERTO} XP\n\n"
-        "🎉 ¡Desafío superado!\n"
-        "⏳ Podrás jugar otra vez dentro de 60 segundos."
+        f"⭐ +{XP_POR_ACIERTO} EXP\n"
+        f"🏆 EXP ganada en esta partida: "
+        f"{desafio['xp_ganada']}\n\n"
+        "♾️ ¡La partida continúa!"
+    )
+
+    await enviar_pregunta(
+        update,
+        context,
+        user.id,
+        sustancia_anterior=sustancia_anterior,
     )
