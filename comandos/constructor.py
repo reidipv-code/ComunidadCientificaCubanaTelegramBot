@@ -88,6 +88,8 @@ async def constructor(
     argumento = " ".join(context.args).strip()
     argumento_normalizado = _nombre_normalizado(argumento)
 
+    # ==================== DESAFÍO ====================
+
     if argumento_normalizado in {
         "desafio",
         "desafío",
@@ -97,6 +99,8 @@ async def constructor(
         await comenzar_desafio(update, context)
         return
 
+    # ==================== LISTA DE SUSTANCIAS ====================
+
     if argumento_normalizado in {
         "lista de sustancias",
         "lista sustancias",
@@ -104,19 +108,30 @@ async def constructor(
     }:
         descubrimientos = listar_descubrimientos(usuario.id)
 
-        if not descubrimientos:
-            await mensaje.reply_text(
-                "🧪 Todavía no has descubierto ninguna sustancia.\n"
-                "Empieza con /constructor H2O"
-            )
-            return
+        # El total se calcula directamente desde el catálogo.
+        # Si se agregan o eliminan sustancias, se actualiza solo.
+        total_descubiertas = len(descubrimientos)
+        total_sustancias = len(SUSTANCIAS)
 
         lineas = [
             "🧪 TUS SUSTANCIAS DESCUBIERTAS",
             "━━━━━━━━━━━━━━━━━━",
-            f"Total: {len(descubrimientos)}",
+            (
+                f"📊 Progreso: "
+                f"{total_descubiertas}/{total_sustancias}"
+            ),
             "",
         ]
+
+        if not descubrimientos:
+            lineas.extend([
+                "Todavía no has descubierto ninguna sustancia.",
+                "",
+                "🔬 Empieza con /constructor H2O",
+            ])
+
+            await mensaje.reply_text("\n".join(lineas))
+            return
 
         lineas.extend(
             f"{i}. {fila['nombre']} — {fila['formula']}"
@@ -125,10 +140,13 @@ async def constructor(
 
         texto = "\n".join(lineas)
 
+        # Telegram limita el tamaño de cada mensaje.
         for inicio in range(0, len(texto), 3800):
             await mensaje.reply_text(texto[inicio:inicio + 3800])
 
         return
+
+    # ==================== BÚSQUEDA POR FÓRMULA ====================
 
     coincidencias = _buscar_por_formula(argumento)
 
@@ -160,6 +178,8 @@ async def constructor(
 
         return
 
+    # ==================== BÚSQUEDA POR NOMBRE ====================
+
     por_nombre = _buscar_por_nombre(argumento)
 
     if por_nombre:
@@ -183,6 +203,8 @@ async def constructor(
             await mensaje.reply_text(_texto_sustancia(sustancia))
 
         return
+
+    # ==================== NO ENCONTRADA ====================
 
     await mensaje.reply_text(
         "❌ No encontré esa fórmula o sustancia.\n\n"
